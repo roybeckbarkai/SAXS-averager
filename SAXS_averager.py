@@ -423,13 +423,41 @@ with st.sidebar:
     chop_points = st.number_input("Chop first N points", min_value=0, value=0, step=1, help="Remove the first N data points from each file before processing.")
 
     st.header("Thresholds")
-    mask_percent = st.slider("Mask % (deviation from median)", 0.0, 100.0, 
-                             st.session_state.get("mask_percent", 20.0), help="Points deviating more than this % from the median are masked.")
-    mask_percent = st.number_input("Mask % Value", 0.0, 100.0, value=mask_percent)
+    
+    # Callback to sync mask percent
+    def sync_mask(key_from, key_to):
+        st.session_state[key_to] = st.session_state[key_from]
+        
+    # Callback to sync ignore percent
+    def sync_ignore(key_from, key_to):
+        st.session_state[key_to] = st.session_state[key_from]
 
-    ignore_percent = st.slider("Ignore % (masked points per frame)", 0.0, 100.0, 
-                               st.session_state.get("ignore_percent", 10.0), help="Frames with more than this % of masked points are ignored completely.")
-    ignore_percent = st.number_input("Ignore % Value", 0.0, 100.0, value=ignore_percent)
+    # Initialize state keys if not present
+    if "mask_percent_slider" not in st.session_state:
+        st.session_state.mask_percent_slider = st.session_state.get("mask_percent", 20.0)
+    if "mask_percent_input" not in st.session_state:
+        st.session_state.mask_percent_input = st.session_state.mask_percent_slider
+        
+    if "ignore_percent_slider" not in st.session_state:
+        st.session_state.ignore_percent_slider = st.session_state.get("ignore_percent", 10.0)
+    if "ignore_percent_input" not in st.session_state:
+        st.session_state.ignore_percent_input = st.session_state.ignore_percent_slider
+
+    st.slider("Mask % (deviation from median)", 0.0, 100.0, 
+              key="mask_percent_slider", 
+              on_change=sync_mask, args=("mask_percent_slider", "mask_percent_input"),
+              help="Points deviating more than this % from the median are masked.")
+    mask_percent = st.number_input("Mask % Value", 0.0, 100.0, 
+                                   key="mask_percent_input",
+                                   on_change=sync_mask, args=("mask_percent_input", "mask_percent_slider"))
+
+    st.slider("Ignore % (masked points per frame)", 0.0, 100.0, 
+              key="ignore_percent_slider",
+              on_change=sync_ignore, args=("ignore_percent_slider", "ignore_percent_input"),
+              help="Frames with more than this % of masked points are ignored completely.")
+    ignore_percent = st.number_input("Ignore % Value", 0.0, 100.0, 
+                                     key="ignore_percent_input",
+                                     on_change=sync_ignore, args=("ignore_percent_input", "ignore_percent_slider"))
 
     st.header("Visualization")
     plot_modes = ["Lin-Lin", "Log-Log", "Guinier", "Kratky", "Porod"]

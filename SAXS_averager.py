@@ -665,6 +665,100 @@ with col_plot:
     
     # Export Section
     st.divider()
+    
+    st.subheader("Batch Processing")
+    st.write("Process all subdirectories of the current Root Directory and save their averages.")
+    if st.button("Batch Save All Subdirectories", type="secondary"):
+        target_dir = select_folder()
+        if target_dir:
+            if target_dir.startswith(st.session_state.nav_root) and target_dir != st.session_state.nav_root:
+                 st.error(f"Please select a directory outside of the current root directory ({st.session_state.nav_root}) to avoid recursion/analysis of the output.")
+            else:
+                successes: int = 0
+                errors: list[str] = []
+                
+                # Setup progress
+                st.write(f"Saving to: `{target_dir}`")
+                p_bar = st.progress(0)
+                status_txt = st.empty()
+                
+                # Get all subdirectories (1 level deep)
+                subdirs = [os.path.join(st.session_state.nav_root, d) for d in os.listdir(st.session_state.nav_root) 
+                           if os.path.isdir(os.path.join(st.session_state.nav_root, d)) and not d.startswith('.')]
+                
+                if not subdirs:
+                    st.warning(f"No valid subdirectories found in {st.session_state.nav_root}")
+                else:
+                    for i, subdir in enumerate(subdirs):
+                        status_txt.text(f"Processing: {os.path.basename(subdir)}")
+                        
+                        # Load and process
+                        q_sub, data_map_sub, _ = load_data(subdir)
+                        if data_map_sub:
+                            # Apply chop points if > 0 (chop_points is from the main UI state for consistency)
+                            if chop_points > 0 and q_sub is not None and len(q_sub) > chop_points:
+                                q_sub = q_sub[chop_points:]
+                                for k in data_map_sub.keys():
+                                    if "I" in data_map_sub[k] and len(data_map_sub[k]["I"]) > chop_points:
+                                        data_map_sub[k]["I"] = data_map_sub[k]["I"][chop_points:]
+
+                            # We ignore overrides for batch processing and rely entirely on Auto logic
+                            stats_sub = calculate_statistics(q_sub, data_map_sub, mask_percent, ignore_percent, {})
+                            
+                            if stats_sub is not None and len(stats_sub.get("frames", [])) > 0:
+                                # Save
+                                out_name = f"{os.path.basename(subdir)}_ave.dat"
+                                out_path = os.path.join(target_dir, out_name)
+                                
+                                out_df = pd.DataFrame({
+                                    "q": stats_sub["q"],  # type: ignore
+                                    "I_mean": stats_sub["mean"],  # type: ignore
+                                    "I_std": stats_sub["std"]  # type: ignore
+                                })
+                                
+                                header_lines = [
+                                    f"SAXS Averaging Log - {datetime.now()}",
+                                    f"Source Directory: {subdir}",
+                                    f"Parameters: Mask > {mask_percent}% deviation, Ignore > {ignore_percent}% bad points",
+                                    "-" * 40,
+                                    "Frame Status (Auto Evaluated for Batch):"
+                                ]
+                                
+                                for f in stats_sub.get("frames", []):  # type: ignore
+                                    status = "EXCLUDED" if f["Is_Excluded"] else "Included"
+                                    details = []
+                                    if f["Excluded"]: details.append("Auto Excluded")
+                                    if f["Points_Masked"]: details.append("Some Pts Masked")
+                                    details.append(f"Bad Points: {f['Bad_Points_Pct']:.2f}%")
+                                    header_lines.append(f"{f['Filename']}\t{status}\t[{', '.join(details)}]")
+                                    
+                                try:
+                                    with open(out_path, "w") as f_out:
+                                        for line in header_lines:
+                                            f_out.write(f"# {line}\n")
+                                        out_df.to_csv(f_out, index=False, sep="\t")
+                                    successes += 1
+                                except Exception as e:
+                                    errors.append(f"Failed to save {out_name}: {e}")
+                            else:
+                                errors.append(f"Skipped {os.path.basename(subdir)}: No valid data after filtering.")
+                        else:
+                            errors.append(f"Skipped {os.path.basename(subdir)}: No .dat/.csv files found.")
+                            
+                        p_bar.progress((i + 1) / len(subdirs))
+                        
+                    p_bar.empty()
+                    status_txt.empty()
+                    
+                    if successes > 0:
+                        st.success(f"Batch completed! Successfully processed {successes} subdirectories.")
+                    if errors:
+                        with st.expander("Show Batch Processing Errors / Skipped Folders"):
+                            for e in errors:
+                                st.warning(e)
+
+    st.divider()
+    st.subheader("Single Folder Export")
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
         dir_name = os.path.basename(os.path.normpath(effective_working_dir))

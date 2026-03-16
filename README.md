@@ -37,16 +37,21 @@ This project provides two main tools:
 
 ## Usage
 
-### Running the App
-Ensure your virtual environment is active, then run:
-```bash
-streamlit run SAXS_averager.py
-```
+### 🚀 Easy Run (Recommended)
+You can use the provided launcher scripts to automatically handle setup and execution:
 
-### Running the Splitter
-```bash
-streamlit run SAXS_splitter.py
-```
+- **macOS / Linux**: Double-click `run_app.sh` or run `./run_app.sh` in your terminal.
+- **Windows**: Double-click `run_app.bat`.
+
+These scripts will automatically create a virtual environment, install the necessary dependencies, and launch the app.
+
+---
+
+### Manual Running
+If you prefer to run things manually:
+1. **Activate the virtual environment**: `source .venv/bin/activate` (Mac/Linux) or `.venv\Scripts\activate` (Windows).
+2. **Run the app**: `streamlit run SAXS_averager.py`.
+
 
 
 ### 📂 Data Source Modes

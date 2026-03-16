@@ -24,7 +24,11 @@ def load_state():
         "mask_percent": 20.0,
         "ignore_percent": 10.0,
         "plot_mode": "Log-Log",
-        "file_overrides": {}  # Stores manual Ignore/Masked decisions
+        "file_overrides": {},  # Stores manual Ignore/Masked decisions
+        "filter_mode": "All Files",
+        "filter_include": "",
+        "filter_exclude": "",
+        "save_fname": "averaged_saxs_ave.dat"
     }
     if os.path.exists(CONFIG_FILE):
         try:
@@ -64,7 +68,7 @@ def select_folder():
         root = tk.Tk()
         root.withdraw()  # Hide the main window.
         root.attributes('-topmost', True)  # Bring the dialog to the front.
-        folder_path = filedialog.askdirectory(master=root)
+        folder_path = filedialog.askdirectory(parent=root)
         root.destroy()
         return folder_path
     except (ImportError, RuntimeError) as e:
@@ -89,7 +93,7 @@ def load_data(directory):
     
     """Parses all .dat/.csv files in the directory."""
     if not os.path.isdir(directory):
-        return None, None, [] # Return q_common, data_map, errors
+        return [], {}, [] # Return q_common, data_map, errors
     
     # Find files
     extensions = ["*.dat", "*.csv", "*.txt"]
@@ -102,14 +106,20 @@ def load_data(directory):
         return [], {}, []
     
     data_map = {}
-    q_common = None
+    q_common = []
     load_errors = [] # Collect errors here
     
     for fpath in files:
         fname = os.path.basename(fpath)
         try:
-            # Flexible reading: tries to detect separator, skips headers starting with #
-            df = pd.read_csv(fpath, sep=None, engine='python', comment='#', header=1)
+            # Flexible reading: uses specific separators to avoid python engine sniffer issues with trailing spaces
+            # Using header=None prevents pandas from accidentally discarding the first data row if no text header exists.
+            try:
+                sep_regex = ',' if fpath.lower().endswith('.csv') else r'\s+'
+                df = pd.read_csv(fpath, sep=sep_regex, engine='python', comment='#', header=None, skip_blank_lines=True)
+            except Exception:
+                # Fallback to auto-detect if regex separator fails
+                df = pd.read_csv(fpath, sep=None, engine='python', comment='#', header=None, skip_blank_lines=True)
 
             # Check for empty dataframe after parsing comments
             if df.empty:
@@ -138,7 +148,7 @@ def load_data(directory):
             i = df_numeric.iloc[:, 1].values
 
             # Use first file's Q as reference
-            if q_common is None:
+            if len(q_common) == 0:
                 q_common = q
             else:
                 # Simple check for matching Q-vector length
@@ -203,26 +213,27 @@ def calculate_statistics(q, data_map, mask_thresh, ignore_thresh, overrides):
         pct_masked = (n_masked / n_q) * 100.0 if n_q > 0 else 0.0
         
         # Auto-detect if frame is "Bad"
-        is_auto_masked = pct_masked > ignore_thresh
+        is_auto_excluded = pct_masked > ignore_thresh
         
         # --- Override Logic ---
         user_state = overrides.get(fname, {})
         user_ignore = user_state.get("Ignore", False)
         
-        # If user explicitly set "Masked", use that. Otherwise use Auto result.
-        if "Masked" in user_state:
-            is_effective_masked = user_state["Masked"]
+        # If user explicitly set "Excluded", use that. Otherwise use Auto result.
+        if "Excluded" in user_state:
+            is_effective_excluded = user_state["Excluded"]
         else:
-            is_effective_masked = is_auto_masked
+            is_effective_excluded = is_auto_excluded
             
-        # Final decision: Exclude if Ignored OR (Effective Masked)
-        is_excluded = user_ignore or is_effective_masked
+        # Final decision: Exclude if Ignored OR (Effective Excluded)
+        is_excluded = user_ignore or is_effective_excluded
         
         frame_results.append({
             "Filename": fname,
             "Ignore": user_ignore,
-            "Masked": is_effective_masked,      # The effective state (User or Auto)
-            "Auto_Mask_Flag": is_auto_masked,   # The purely algorithmic state
+            "Excluded": is_effective_excluded,      # The effective state (User or Auto)
+            "Points_Masked": pct_masked > 0,
+            "Auto_Exclude_Flag": is_auto_excluded,   # The purely algorithmic state
             "Bad_Points_Pct": pct_masked,
             "Is_Excluded": is_excluded,
             "I": I_matrix[idx],
@@ -294,16 +305,21 @@ if not data_map:
 
 with st.sidebar:
     st.header("File Filtering")
-    filter_mode = st.radio("Filter Mode", ["All Files", "Include Pattern", "Exclude Pattern", "Manual Selection"])
+    # Load filter options from state
+    f_mode_default = st.session_state.get("filter_mode", "All Files")
+    filter_mode = st.radio("Filter Mode", ["All Files", "Include Pattern", "Exclude Pattern", "Manual Selection"], 
+                           index=["All Files", "Include Pattern", "Exclude Pattern", "Manual Selection"].index(f_mode_default) if f_mode_default in ["All Files", "Include Pattern", "Exclude Pattern", "Manual Selection"] else 0)
     
     all_files = sorted(list(data_map.keys()))
     selected_files = all_files
 
     if filter_mode == "Include Pattern":
-        pat = st.text_input("Filename contains:", "")
+        pat_def = st.session_state.get("filter_include", "")
+        pat = st.text_input("Filename contains:", pat_def)
         if pat: selected_files = [f for f in all_files if pat in f]
     elif filter_mode == "Exclude Pattern":
-        pat = st.text_input("Filename excludes:", "")
+        pat_def = st.session_state.get("filter_exclude", "")
+        pat = st.text_input("Filename excludes:", pat_def)
         if pat: selected_files = [f for f in all_files if pat not in f]
     elif filter_mode == "Manual Selection":
         selected_files = st.multiselect("Select Files", all_files, default=all_files)
@@ -354,31 +370,54 @@ stats = calculate_statistics(q, data_map, mask_percent, ignore_percent, current_
 # 3. Prepare Data for Editor
 # We display the *effective* status. User can toggle checkboxes to change it.
 frame_data = stats["frames"]
+
+# Assign colors for the plot and table
+import plotly.express as px
+file_colors = {}
+for f in frame_data:
+    if f["Is_Excluded"]:
+        file_colors[f["Filename"]] = "lightgrey" # Light gray
+    else:
+        file_colors[f["Filename"]] = "blue"
+
 df_display = pd.DataFrame([
     {
         "Filename": f["Filename"],
         "Ignore": f["Ignore"],
-        "Masked": f["Masked"],
+        "Excluded": f["Excluded"],
+        "Points Masked": f["Points_Masked"],
         "Bad Points %": f"{f['Bad_Points_Pct']:.2f}%"
     }
     for f in frame_data
 ])
 
+def color_rows(row):
+    color = file_colors.get(row["Filename"], "transparent")
+    if color == "lightgrey":
+        # Darken text slightly for readability or use background
+        # We will set a light background
+        return ['background-color: #f0f0f0; color: #a0a0a0'] * len(row)
+    return [f'background-color: {color}; color: white; border-radius: 4px;'] * len(row)
+
+styled_df = df_display.style.apply(color_rows, axis=1)
+
+
 col_ui, col_plot = st.columns([1, 2])
 
 with col_ui:
     st.subheader("Frame Selection")
-    st.caption("Check 'Ignore' to force exclude. Check/Uncheck 'Masked' to override outlier detection.")
+    st.caption("Check 'Ignore' to force exclude. Check/Uncheck 'Excluded' to override auto-exclusion. 'Points Masked' indicates if any points were skipped.")
     
     edited_df = st.data_editor(
-        df_display,
+        styled_df,
         column_config={
             "Filename": st.column_config.TextColumn(disabled=True),
             "Bad Points %": st.column_config.TextColumn(disabled=True),
+            "Points Masked": st.column_config.CheckboxColumn(disabled=True),
             "Ignore": st.column_config.CheckboxColumn(label="Ignore"),
-            "Masked": st.column_config.CheckboxColumn(label="Masked")
+            "Excluded": st.column_config.CheckboxColumn(label="Excluded")
         },
-        disabled=["Filename", "Bad Points %"],
+        disabled=["Filename", "Bad Points %", "Points Masked"],
         hide_index=True,
         key="frame_editor",
         height=600
@@ -392,7 +431,7 @@ with col_ui:
     for index, row in edited_df.iterrows():
         fname = row["Filename"]
         u_ign = row["Ignore"]
-        u_msk = row["Masked"]
+        u_exc = row["Excluded"]
         
         # Find the original auto-mask value to see if we are overriding
         orig_stat = next(x for x in frame_data if x["Filename"] == fname)
@@ -402,11 +441,11 @@ with col_ui:
         if u_ign:
             entry["Ignore"] = True
         
-        # Only save Masked state if it differs from the Algorithm's Auto-Flag
+        # Only save Excluded state if it differs from the Algorithm's Auto-Flag
         # This allows the checkbox to update automatically if the user changes the slider,
         # UNLESS the user has manually touched it.
-        if u_msk != orig_stat["Auto_Mask_Flag"]:
-            entry["Masked"] = u_msk
+        if u_exc != orig_stat["Auto_Exclude_Flag"]:
+            entry["Excluded"] = u_exc
             
         if entry:
             new_overrides[fname] = entry
@@ -445,23 +484,43 @@ with col_plot:
     # For now, we plot all but make them thin.
     
     for f in stats["frames"]:
-        # Excluded frames in Red (dimmed), Valid in Gray (dimmed)
-        if f["Is_Excluded"]:
-            color = "rgba(255, 50, 50, 0.2)"
-            name = "Excluded"
-        else:
-            color = "rgba(0, 100, 255, 0.15)"
-            name = "Included"
-            
+        color = file_colors.get(f["Filename"], "rgba(0,0,0,1)")
+        
+        # We will split data into valid and masked points so masked are dim
         x_p, y_p = transform(stats["q"], f["I"], plot_mode)
         
+        # Valid points trace
+        point_mask_bool = np.asarray(f["Point_Mask"], dtype=bool)
+        valid_mask = ~point_mask_bool
+        masked_mask = point_mask_bool
+        
+        x_valid = np.where(valid_mask, x_p, np.nan)
+        y_valid = np.where(valid_mask, y_p, np.nan)
+        
         fig.add_trace(go.Scatter(
-            x=x_p, y=y_p, 
+            x=x_valid, y=y_valid, 
             mode='lines', 
-            line=dict(color=color, width=1),
+            line=dict(color=color, width=2 if not f["Is_Excluded"] else 1),
+            name=f["Filename"],
             showlegend=False, 
-            hoverinfo='skip'
+            hovertext=f["Filename"],
+            hoverinfo='text+x+y'
         ))
+        
+        # Masked points trace (dim gray)
+        if np.any(masked_mask):
+            x_masked = np.where(masked_mask, x_p, np.nan)
+            y_masked = np.where(masked_mask, y_p, np.nan)
+            fname_str = str(f["Filename"])
+            fig.add_trace(go.Scatter(
+                x=x_masked, y=y_masked, 
+                mode='lines', 
+                line=dict(color="lightgrey", width=1),
+                name=fname_str + " (Masked)",
+                showlegend=False, 
+                hovertext=fname_str + " (Masked)",
+                hoverinfo='text+x+y'
+            ))
         
     # Plot Average
     x_avg, y_avg = transform(stats["q"], stats["mean"], plot_mode)
@@ -507,19 +566,25 @@ with col_plot:
         x_pad = (x_max - x_min) * 0.05 if (x_max - x_min) > 0 else 0.1
         y_pad = (y_max - y_min) * 0.05 if (y_max - y_min) > 0 else 0.1
         
-        x_range = [x_min, x_max]
-        y_range = [y_min, y_max]
-
-        if plot_mode != "Log-Log":
+        if plot_mode == "Log-Log":
+            # Plotly log axes require the range to be given in log10(value)
+            # We must be careful to avoid taking log10 of <= 0
+            safe_x_min = np.nanmin(np.where(x_avg > 0, x_avg, np.inf))
+            safe_y_min = np.nanmin(np.where(y_avg > 0, y_avg, np.inf))
+            x_range = [np.log10(safe_x_min), np.log10(x_max)] if safe_x_min < np.inf and x_max > 0 else None
+            y_range = [np.log10(safe_y_min), np.log10(y_max)] if safe_y_min < np.inf and y_max > 0 else None
+        else:
             x_range = [x_min - x_pad, x_max + x_pad]
             y_range = [y_min - y_pad, y_max + y_pad]
         
         # For Guinier, ensure x-axis starts at or before 0
-        if plot_mode == "Guinier":
+        if plot_mode == "Guinier" and x_range is not None:
             x_range[0] = min(x_range[0], 0)
 
-        fig.update_xaxes(range=x_range)
-        fig.update_yaxes(range=y_range)
+        if x_range is not None:
+            fig.update_xaxes(range=x_range)
+        if y_range is not None:
+            fig.update_yaxes(range=y_range)
     except ValueError: # This happens if x_avg/y_avg is all NaN
         pass # Let plotly auto-range if calculation fails
     st.plotly_chart(fig, width='stretch')
@@ -528,7 +593,17 @@ with col_plot:
     st.divider()
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        save_fname = st.text_input("Output Filename", "averaged_saxs.dat")
+        dir_name = os.path.basename(os.path.normpath(working_dir))
+        if not dir_name:
+            dir_name = "averaged_saxs"
+        auto_save_name = f"{dir_name}_ave.dat"
+        
+        save_fname = st.text_input("Output Filename", value=auto_save_name)
+        
+        # Force ending to be _ave.dat explicitly if user accidentally clears it
+        if not save_fname.endswith("_ave.dat"):
+            save_fname = save_fname + "_ave.dat"
+            st.caption(f"Will be saved as: **{save_fname}**")
     with c2:
         st.write("") # Spacer
         save_btn = st.button("Save Data & Log", type="primary")
@@ -569,7 +644,8 @@ with col_plot:
                 status = "EXCLUDED" if f["Is_Excluded"] else "Included"
                 details = []
                 if f["Ignore"]: details.append("Manual Ignore")
-                if f["Masked"]: details.append("Masked")
+                if f["Excluded"]: details.append("Auto/Manual Excluded")
+                if f["Points_Masked"]: details.append("Some Pts Masked")
                 details.append(f"Bad Points: {f['Bad_Points_Pct']:.2f}%")
                 header_lines.append(f"{f['Filename']}\t{status}\t[{', '.join(details)}]")
                 
@@ -588,6 +664,10 @@ curr_state = {
     "mask_percent": mask_percent,
     "ignore_percent": ignore_percent,
     "plot_mode": plot_mode,
-    "file_overrides": st.session_state.get("file_overrides", {})
+    "file_overrides": st.session_state.get("file_overrides", {}),
+    "filter_mode": filter_mode,
+    "filter_include": pat if filter_mode == "Include Pattern" else st.session_state.get("filter_include", ""),
+    "filter_exclude": pat if filter_mode == "Exclude Pattern" else st.session_state.get("filter_exclude", ""),
+    "save_fname": save_fname if 'save_fname' in locals() else st.session_state.get("save_fname", "averaged_saxs_ave.dat")
 }
 save_state(curr_state)

@@ -1,1 +1,1 @@
-{"working_dir": "/Users/roybeck/Documents/New project/data gal/smaller/", "mask_percent": 52.05, "ignore_percent": 42.21, "plot_mode": "Porod", "file_overrides": {}}
+{"working_dir": "/Users/roybeck/Library/CloudStorage/Dropbox/python code/SAXS-averager/data gal/smaller/", "mask_percent": 8.61, "ignore_percent": 11.07, "plot_mode": "Kratky", "file_overrides": {}, "filter_mode": "All Files", "filter_include": "", "filter_exclude": "", "save_fname": "smaller_ave.dat"}

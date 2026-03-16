@@ -16,25 +16,38 @@ This project provides two main tools:
    cd SAXS-averager
    ```
 
-2. **Install dependencies:**
-   If `pip` is not recognized on your machine, use `python3 -m pip`:
+2. **Create and Activate a Virtual Environment (Recommended):**
+   Modern macOS prevents installing packages globally. Use these commands to create a local workspace:
    ```bash
-   python3 -m pip install streamlit pandas numpy plotly scipy sasmodels
+   # Create the environment
+   python3 -m venv .venv
+   
+   # Activate it (on Mac/Linux)
+   source .venv/bin/activate
+   
+   # Activate it (on Windows)
+   # .venv\Scripts\activate
+   ```
+
+3. **Install dependencies:**
+   Once the environment is active (you see `(.venv)` in your terminal):
+   ```bash
+   pip install streamlit pandas numpy plotly scipy sasmodels
    ```
 
 ## Usage
 
 ### Running the App
-To run the main application:
+Ensure your virtual environment is active, then run:
 ```bash
-python3 -m streamlit run SAXS_averager.py
+streamlit run SAXS_averager.py
 ```
 
 ### Running the Splitter
-To run the file splitter directly:
 ```bash
-python3 -m streamlit run SAXS_splitter.py
+streamlit run SAXS_splitter.py
 ```
+
 
 ### 📂 Data Source Modes
 - **Local Directory**: (Best for local use) Browse folders on your machine using the native file dialog (Mac/PC) or the interactive Directory Tree.

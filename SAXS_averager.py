@@ -273,24 +273,102 @@ st.title("SAXS Data Averager")
 with st.sidebar:
     st.header("Data Source")
 
-    if st.button("Browse for directory"):
+    if "nav_root" not in st.session_state:
+        st.session_state.nav_root = st.session_state.get("working_dir", os.getcwd())
+
+    if st.button("Browse for root directory"):
         selected_dir = select_folder()
         if selected_dir:
+            st.session_state.nav_root = selected_dir
             st.session_state.working_dir = selected_dir
             st.rerun()
 
-    # The text input is bound to session state for robust state management.
-    st.text_input("Directory Path", key="working_dir")
-    working_dir = st.session_state.working_dir
+    nav_root_input = st.text_input("Root Directory Path", value=st.session_state.nav_root)
+    if nav_root_input != st.session_state.nav_root:
+        st.session_state.nav_root = nav_root_input
+        st.session_state.working_dir = nav_root_input
+        st.rerun()
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("⬆️ Move Up", use_container_width=True):
+            st.session_state.nav_root = os.path.dirname(st.session_state.nav_root)
+            st.rerun()
+    with c2:
+        if st.button("⏬ Move Down", use_container_width=True):
+            if st.session_state.get("working_dir") and os.path.isdir(st.session_state.working_dir):
+                st.session_state.nav_root = st.session_state.working_dir
+                st.rerun()
+
+    @st.cache_data(show_spinner=False)
+    def scan_directory_tree(base_dir, max_depth=3):
+        if not os.path.isdir(base_dir):
+            return []
+        paths = []
+        base_depth = base_dir.rstrip(os.sep).count(os.sep)
+        try:
+            for root, dirs, files in os.walk(base_dir):
+                dirs[:] = sorted([d for d in dirs if not d.startswith('.')])
+                current_depth = root.rstrip(os.sep).count(os.sep) - base_depth
+                if current_depth >= max_depth:
+                    del dirs[:]
+                    continue
+                rel_path = os.path.relpath(root, base_dir)
+                if rel_path != '.':
+                    paths.append(rel_path)
+        except Exception:
+            pass
+        return paths
+
+    tree_options = ["."] + scan_directory_tree(st.session_state.nav_root, max_depth=3)
+
+    def format_opt(p):
+        if p == ".":
+            return f"📂 {os.path.basename(os.path.normpath(st.session_state.nav_root)) or st.session_state.nav_root} (Root)"
+        depth = p.count(os.sep)
+        indent = "—" * (depth * 2)
+        return f"{indent} 📁 " + os.path.basename(p)
+
+    st.caption("Directory Tree (3 layers)")
+    with st.container(height=300):
+        try:
+            rel_curr = os.path.relpath(st.session_state.get("working_dir", ""), st.session_state.nav_root)
+            default_idx = tree_options.index(rel_curr) if rel_curr in tree_options else 0
+        except ValueError:
+            default_idx = 0
+            
+        selected_rel = st.radio("Directory Tree", tree_options, index=default_idx, format_func=format_opt, label_visibility="collapsed")
+
+    if selected_rel == ".":
+        effective_working_dir = st.session_state.nav_root
+    else:
+        effective_working_dir = os.path.join(st.session_state.nav_root, selected_rel)
+        
+    if effective_working_dir != st.session_state.get("working_dir"):
+        st.session_state.working_dir = effective_working_dir
+        st.rerun()
     
+    st.markdown("---")
+    st.header("Tools")
+    if st.button("Open File Splitter"):
+        # Launch SAXS_splitter.py in a separate process
+        try:
+            splitter_path = os.path.join(os.path.dirname(__file__), "SAXS_splitter.py")
+            if os.path.exists(splitter_path):
+                subprocess.Popen(["streamlit", "run", splitter_path, "--server.port", "8502"])
+                st.success("File Splitter opened in a new tab/window.")
+            else:
+                st.error("SAXS_splitter.py not found in the same directory.")
+        except Exception as e:
+            st.error(f"Failed to open File Splitter: {e}")
 
 # --- Load Data & Filtering ---
-if not os.path.isdir(working_dir):
-    st.warning(f"Directory not found: {working_dir}")
+if not os.path.isdir(effective_working_dir):
+    st.warning(f"Directory not found: {effective_working_dir}")
     st.stop()
 
 # Modified call to load_data to get errors
-q, data_map, file_load_errors = load_data(working_dir)
+q, data_map, file_load_errors = load_data(effective_working_dir)
 
 # Display file loading errors
 if file_load_errors:
@@ -593,7 +671,7 @@ with col_plot:
     st.divider()
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        dir_name = os.path.basename(os.path.normpath(working_dir))
+        dir_name = os.path.basename(os.path.normpath(effective_working_dir))
         if not dir_name:
             dir_name = "averaged_saxs"
         auto_save_name = f"{dir_name}_ave.dat"
@@ -609,7 +687,7 @@ with col_plot:
         save_btn = st.button("Save Data & Log", type="primary")
     
     if save_btn:
-        out_path = os.path.join(working_dir, save_fname)
+        out_path = os.path.join(effective_working_dir, save_fname)
         
         # Overwrite protection
         proceed = True
@@ -634,7 +712,7 @@ with col_plot:
             # Generate Log Header
             header_lines = [
                 f"SAXS Averaging Log - {datetime.now()}",
-                f"Directory: {working_dir}",
+                f"Directory: {effective_working_dir}",
                 f"Parameters: Mask > {mask_percent}% deviation, Ignore > {ignore_percent}% bad points",
                 "-" * 40,
                 "Frame Status:"

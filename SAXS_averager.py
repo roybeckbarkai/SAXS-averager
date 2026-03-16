@@ -79,8 +79,17 @@ def select_folder():
         root.destroy()
         return folder_path
     except (ImportError, RuntimeError) as e:
-        st.warning(f"Could not open directory browser: {e}. Please paste the path manually.")
+        # Don't show warning on cloud environments
         return ""
+
+def has_gui():
+    """Checks if the current environment supports graphical windows."""
+    if sys.platform == 'darwin':
+        return True
+    if sys.platform == 'win32':
+        return True
+    # For Linux, check for DISPLAY environment variable
+    return "DISPLAY" in os.environ
 
 # Initialize Session State
 if "config_loaded" not in st.session_state:
@@ -286,12 +295,15 @@ with st.sidebar:
     if "nav_root" not in st.session_state:
         st.session_state.nav_root = st.session_state.get("working_dir", os.getcwd())
 
-    if st.button("Browse for root directory"):
-        selected_dir = select_folder()
-        if selected_dir:
-            st.session_state.nav_root = selected_dir
-            st.session_state.working_dir = selected_dir
-            st.rerun()
+    if has_gui():
+        if st.button("Browse for root directory"):
+            selected_dir = select_folder()
+            if selected_dir:
+                st.session_state.nav_root = selected_dir
+                st.session_state.working_dir = selected_dir
+                st.rerun()
+    else:
+        st.caption("ℹ️ Local folder browsing is disabled on Cloud. Please use the Directory Tree or paste a path below.")
 
     nav_root_input = st.text_input("Root Directory Path", value=st.session_state.nav_root)
     if nav_root_input != st.session_state.nav_root:

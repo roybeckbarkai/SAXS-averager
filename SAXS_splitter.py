@@ -48,8 +48,16 @@ def select_folder():
         root.destroy()
         return folder_path
     except (ImportError, RuntimeError) as e:
-        st.warning(f"Could not open directory browser: {e}. Please paste the path manually.")
         return ""
+
+def has_gui():
+    """Checks if the current environment supports graphical windows."""
+    if sys.platform == 'darwin':
+        return True
+    if sys.platform == 'win32':
+        return True
+    # For Linux, check for DISPLAY environment variable
+    return "DISPLAY" in os.environ
 
 def parse_filename(filename):
     """
@@ -116,12 +124,15 @@ with st.sidebar:
         if "file_table" in st.session_state:
             del st.session_state["file_table"]
 
-    if st.button("Browse for directory"):
-        selected_dir = select_folder()
-        if selected_dir:
-            st.session_state.splitter_dir = selected_dir
-            clear_file_table()
-            st.rerun()
+    if has_gui():
+        if st.button("Browse for directory"):
+            selected_dir = select_folder()
+            if selected_dir:
+                st.session_state.splitter_dir = selected_dir
+                clear_file_table()
+                st.rerun()
+    else:
+        st.caption("ℹ️ Local folder browsing is disabled on Cloud. Please paste the path below.")
 
     st.text_input("Directory Path", key="splitter_dir", on_change=clear_file_table)
         

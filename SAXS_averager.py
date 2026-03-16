@@ -121,65 +121,40 @@ def load_data(directory):
     if not files:
         return [], {}, []
     
+    return load_data_from_sources(files)
+
+def parse_single_file(file_obj, name):
+    """Parses a single file-like object or path and returns (q, I)."""
+    sep_regex = ',' if name.lower().endswith('.csv') else r'\s+'
+    df = pd.read_csv(file_obj, sep=sep_regex, engine='python', comment='#', header=None, skip_blank_lines=True)
+    if df.empty:
+        raise ValueError("File is empty or contains only comments.")
+    df_numeric = df.apply(pd.to_numeric, errors='coerce').dropna(subset=[0, 1])
+    if df_numeric.empty or df_numeric.shape[1] < 2:
+        raise ValueError("No valid numeric data rows found.")
+    return df_numeric.iloc[:, 0].values, df_numeric.iloc[:, 1].values
+
+def load_data_from_sources(sources):
+    """
+    Unified loader for both local paths and uploaded file objects.
+    sources: list of strings (paths) or list of UploadedFile objects.
+    """
     data_map = {}
     q_common = []
-    load_errors = [] # Collect errors here
+    load_errors = []
     
-    for fpath in files:
-        fname = os.path.basename(fpath)
+    for src in sources:
+        name = src.name if hasattr(src, 'name') else os.path.basename(src)
         try:
-            # Flexible reading: uses specific separators to avoid python engine sniffer issues with trailing spaces
-            # Using header=None prevents pandas from accidentally discarding the first data row if no text header exists.
-            try:
-                sep_regex = ',' if fpath.lower().endswith('.csv') else r'\s+'
-                df = pd.read_csv(fpath, sep=sep_regex, engine='python', comment='#', header=None, skip_blank_lines=True)
-            except Exception:
-                # Fallback to auto-detect if regex separator fails
-                df = pd.read_csv(fpath, sep=None, engine='python', comment='#', header=None, skip_blank_lines=True)
-
-            # Check for empty dataframe after parsing comments
-            if df.empty:
-                load_errors.append(f"'{fname}': File is empty or contains only comments.")
-                continue
-
-            # Force numeric and drop NaNs
-            df_numeric = df.apply(pd.to_numeric, errors='coerce')
-
-            # Drop rows where q or I are NaN after conversion
-            if df_numeric.shape[1] >= 2:
-                df_numeric = df_numeric.dropna(subset=[0, 1]) # Ensure q and I columns are numeric
-
-            if df_numeric.empty:
-                load_errors.append(f"'{fname}': No valid numeric data rows found after parsing.")
-                continue
-
-            # Ensure we have at least Q and I
-            if df_numeric.shape[1] < 2:
-                load_errors.append(f"'{fname}': Expected at least 2 columns (q, I), but found {df_numeric.shape[1]}.")
-                continue
-            elif df_numeric.shape[1] > 3:
-                load_errors.append(f"'{fname}': Found more than 3 columns ({df_numeric.shape[1]}). Only first two (q, I) will be used.")
-
-            q = df_numeric.iloc[:, 0].values
-            i = df_numeric.iloc[:, 1].values
-
-            # Use first file's Q as reference
+            q, i = parse_single_file(src, name)
             if len(q_common) == 0:
                 q_common = q
-            else:
-                # Simple check for matching Q-vector length
-                if len(q) != len(q_common):
-                    load_errors.append(f"'{fname}': Q-vector length ({len(q)}) does not match reference ({len(q_common)}). Skipping.")
-                    continue
-
-            data_map[fname] = {"I": i}
-        except pd.errors.EmptyDataError:
-            load_errors.append(f"'{fname}': File is empty.")
-        except pd.errors.ParserError as e:
-            load_errors.append(f"'{fname}': Parsing error - check delimiters or data format. Details: {e}")
-        except Exception as e: # Catch any other unexpected errors
-            load_errors.append(f"'{fname}': An unexpected error occurred during parsing. Details: {e}")
-            continue
+            elif len(q) != len(q_common):
+                 load_errors.append(f"'{name}': Q-vector length mismatch. Skipping.")
+                 continue
+            data_map[name] = {"I": i}
+        except Exception as e:
+            load_errors.append(f"'{name}': {e}")
             
     return q_common, data_map, load_errors
 
@@ -291,87 +266,100 @@ st.title("SAXS Data Averager")
 # Sidebar
 with st.sidebar:
     st.header("Data Source")
+    source_type = st.radio("Load Mode", ["Local Directory", "File Upload"], 
+                           index=0 if has_gui() else 1,
+                           help="Select 'Local Directory' to browse your computer's folders (Mac/PC only), or 'File Upload' to select specific files from your browser.")
 
-    if "nav_root" not in st.session_state:
-        st.session_state.nav_root = st.session_state.get("working_dir", os.getcwd())
+    if source_type == "Local Directory":
+        if "nav_root" not in st.session_state:
+            st.session_state.nav_root = st.session_state.get("working_dir", os.getcwd())
 
-    if has_gui():
-        if st.button("Browse for root directory"):
-            selected_dir = select_folder()
-            if selected_dir:
-                st.session_state.nav_root = selected_dir
-                st.session_state.working_dir = selected_dir
-                st.rerun()
-    else:
-        st.caption("ℹ️ Local folder browsing is disabled on Cloud. Please use the Directory Tree or paste a path below.")
+        if has_gui():
+            if st.button("Browse for root directory"):
+                selected_dir = select_folder()
+                if selected_dir:
+                    st.session_state.nav_root = selected_dir
+                    st.session_state.working_dir = selected_dir
+                    st.rerun()
+        else:
+            st.caption("ℹ️ Local folder browsing is disabled on Cloud. Please use the Directory Tree or paste a path below.")
 
-    nav_root_input = st.text_input("Root Directory Path", value=st.session_state.nav_root)
-    if nav_root_input != st.session_state.nav_root:
-        st.session_state.nav_root = nav_root_input
-        st.session_state.working_dir = nav_root_input
-        st.rerun()
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("⬆️ Move Up", use_container_width=True):
-            st.session_state.nav_root = os.path.dirname(st.session_state.nav_root)
+        nav_root_input = st.text_input("Root Directory Path", value=st.session_state.nav_root)
+        if nav_root_input != st.session_state.nav_root:
+            st.session_state.nav_root = nav_root_input
+            st.session_state.working_dir = nav_root_input
             st.rerun()
-    with c2:
-        if st.button("⏬ Move Down", use_container_width=True):
-            if st.session_state.get("working_dir") and os.path.isdir(st.session_state.working_dir):
-                st.session_state.nav_root = st.session_state.working_dir
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("⬆️ Move Up", use_container_width=True):
+                st.session_state.nav_root = os.path.dirname(st.session_state.nav_root)
                 st.rerun()
+        with c2:
+            if st.button("⏬ Move Down", use_container_width=True):
+                if st.session_state.get("working_dir") and os.path.isdir(st.session_state.working_dir):
+                    st.session_state.nav_root = st.session_state.working_dir
+                    st.rerun()
 
-    @st.cache_data(show_spinner=False)
-    def scan_directory_tree(base_dir, max_depth=3):
-        if not os.path.isdir(base_dir):
-            return []
-        paths = []
-        base_depth = base_dir.rstrip(os.sep).count(os.sep)
-        try:
-            for root, dirs, files in os.walk(base_dir):
-                valid_dirs = sorted([d for d in dirs if not d.startswith('.')])
-                dirs.clear()
-                dirs.extend(valid_dirs)
-                current_depth = root.rstrip(os.sep).count(os.sep) - base_depth
-                if current_depth >= max_depth:
+        @st.cache_data(show_spinner=False)
+        def scan_directory_tree(base_dir, max_depth=3):
+            if not os.path.isdir(base_dir):
+                return []
+            paths = []
+            base_depth = base_dir.rstrip(os.sep).count(os.sep)
+            try:
+                for root, dirs, files in os.walk(base_dir):
+                    valid_dirs = sorted([d for d in dirs if not d.startswith('.')])
                     dirs.clear()
-                    continue
-                rel_path = os.path.relpath(root, base_dir)
-                if rel_path != '.':
-                    paths.append(rel_path)
-        except Exception:
-            pass
-        return paths
+                    dirs.extend(valid_dirs)
+                    current_depth = root.rstrip(os.sep).count(os.sep) - base_depth
+                    if current_depth >= max_depth:
+                        dirs.clear()
+                        continue
+                    rel_path = os.path.relpath(root, base_dir)
+                    if rel_path != '.':
+                        paths.append(rel_path)
+            except Exception:
+                pass
+            return paths
 
-    tree_options = ["."] + scan_directory_tree(st.session_state.nav_root, max_depth=3)
+        tree_options = ["."] + scan_directory_tree(st.session_state.nav_root, max_depth=3)
 
-    def format_opt(p):
-        if p == ".":
-            return f"📂 {os.path.basename(os.path.normpath(st.session_state.nav_root)) or st.session_state.nav_root} (Root)"
-        depth = p.count(os.sep)
-        indent = "—" * (depth * 2)
-        return f"{indent} 📁 " + os.path.basename(p)
+        def format_opt(p):
+            if p == ".":
+                return f"📂 {os.path.basename(os.path.normpath(st.session_state.nav_root)) or st.session_state.nav_root} (Root)"
+            depth = p.count(os.sep)
+            indent = "—" * (depth * 2)
+            return f"{indent} 📁 " + os.path.basename(p)
 
-    st.caption("Directory Tree (3 layers)")
-    with st.container(height=300):
-        try:
-            rel_curr = os.path.relpath(st.session_state.get("working_dir", ""), st.session_state.nav_root)
-            default_idx = tree_options.index(rel_curr) if rel_curr in tree_options else 0
-        except ValueError:
-            default_idx = 0
+        st.caption("Directory Tree (3 layers)")
+        with st.container(height=300):
+            try:
+                rel_curr = os.path.relpath(st.session_state.get("working_dir", ""), st.session_state.nav_root)
+                default_idx = tree_options.index(rel_curr) if rel_curr in tree_options else 0
+            except ValueError:
+                default_idx = 0
+                
+            selected_rel = st.radio("Directory Tree", tree_options, index=default_idx, format_func=format_opt, label_visibility="collapsed")
+
+        if selected_rel == ".":
+            effective_working_dir = st.session_state.nav_root
+        else:
+            effective_working_dir = os.path.join(st.session_state.nav_root, selected_rel)
             
-        selected_rel = st.radio("Directory Tree", tree_options, index=default_idx, format_func=format_opt, label_visibility="collapsed")
-
-    if selected_rel == ".":
-        effective_working_dir = st.session_state.nav_root
-    else:
-        effective_working_dir = os.path.join(st.session_state.nav_root, selected_rel)
-        
-    if effective_working_dir != st.session_state.get("working_dir"):
-        st.session_state.working_dir = effective_working_dir
-        st.rerun()
+        if effective_working_dir != st.session_state.get("working_dir"):
+            st.session_state.working_dir = effective_working_dir
+            st.rerun()
     
+    else:
+        # File Upload Mode
+        st.subheader("Upload Files")
+        uploaded_files = st.file_uploader("Select .dat / .csv / .txt files", type=["dat", "csv", "txt"], accept_multiple_files=True)
+        if not uploaded_files:
+            st.info("Please upload one or more data files to begin.")
+            st.stop()
+        effective_working_dir = "uploaded_session" 
+
     st.markdown("---")
     st.header("Tools")
     if st.button("Open File Splitter"):
@@ -395,12 +383,21 @@ with st.sidebar:
             st.error(f"Failed to open File Splitter: {e}")
 
 # --- Load Data & Filtering ---
-if not os.path.isdir(effective_working_dir):
-    st.warning(f"Directory not found: {effective_working_dir}")
-    st.stop()
-
-# Modified call to load_data to get errors
-q, data_map, file_load_errors = load_data(effective_working_dir)
+if source_type == "Local Directory":
+    if not os.path.isdir(effective_working_dir):
+        st.warning(f"Directory not found: {effective_working_dir}")
+        st.stop()
+    
+    # Get local paths
+    extensions = ["*.dat", "*.csv", "*.txt"]
+    local_files = []
+    for ext in extensions:
+        local_files.extend(glob.glob(os.path.join(effective_working_dir, ext)))
+    local_files = sorted(list(set(local_files)))
+    q, data_map, file_load_errors = load_data_from_sources(local_files)
+else:
+    # Use uploaded buffers
+    q, data_map, file_load_errors = load_data_from_sources(uploaded_files)
 
 # Display file loading errors
 if file_load_errors:

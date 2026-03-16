@@ -40,8 +40,9 @@ This project provides two main tools:
 ### 🚀 Easy Run (Recommended)
 You can use the provided launcher scripts to automatically handle setup and execution:
 
-- **macOS / Linux**: Double-click `run_app.sh` or run `./run_app.sh` in your terminal.
+- **macOS**: Double-click `run_app.command`.
 - **Windows**: Double-click `run_app.bat`.
+- **Linux**: Run `bash run_app.command` or rename it back to `.sh` and run.
 
 These scripts will automatically create a virtual environment, install the necessary dependencies, and launch the app.
 

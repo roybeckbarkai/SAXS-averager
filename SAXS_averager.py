@@ -1,4 +1,11 @@
-## SAXS averager 
+"""
+SAXS Data Averager
+
+A robust Streamlit web application for visualizing, sorting, filtering, and 
+averaging Small-Angle X-ray Scattering (SAXS) data. 
+It supports live-updating charts, statistical outlier rejection, manual overrides,
+and batch saving of entire folder structures.
+"""
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -169,12 +176,15 @@ def load_data(directory):
 
 def calculate_statistics(q, data_map, mask_thresh, ignore_thresh, overrides):
     """
-    Core logic:
-    1. Calculate Median across valid frames.
-    2. Identify bad points (deviation > mask_thresh).
-    3. Identify bad frames (bad points > ignore_thresh).
-    4. Apply Manual Overrides (Ignore/Masked).
-    5. Calculate Final Mean/Std.
+    Core statistical engine for cleaning and averaging SAXS frames.
+    
+    1. Calculate a Reference Median across all non-manually-ignored frames.
+    2. Identify bad points (where deviation from the median > `mask_thresh`).
+    3. Identify bad frames (where the total % of bad points > `ignore_thresh`).
+    4. Apply User Manual Overrides (Explicitly Ignore / Include).
+    5. Calculate Final Mean and Std Dev using only the valid points from valid frames.
+    
+    Returns a dictionary of aggregated statistics and point-by-point frame lists.
     """
     if not data_map:
         return None

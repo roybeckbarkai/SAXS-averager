@@ -1,3 +1,12 @@
+"""
+SAXS File Splitter
+
+A Streamlit application that scans a directory of SAXS data files (.dat, .csv),
+suggests subdirectories based on patterns in the filenames, and provides an
+interactive table to safely move those files into the target directories in bulk.
+
+This is meant to help organize raw data before processing it in SAXS_averager.py.
+"""
 import streamlit as st
 import os
 import glob
@@ -11,7 +20,7 @@ import json
 # --- Page Configuration ---
 st.set_page_config(page_title="SAXS File Splitter", layout="wide")
 
-# Navigation helper (runs on the client to close the window)
+# Navigation helper (runs on the client to close the window from the browser side)
 def close_window():
     st.markdown("<script>window.close();</script>", unsafe_allow_html=True)
     st.info("Please close this tab to return to the Averager.")
@@ -60,6 +69,10 @@ def parse_filename(filename):
 
 
 def load_and_parse_directory(directory):
+    """
+    Finds all valid SAXS data files in the given directory and creates a
+    dictionary representing rows in the interactive file table.
+    """
     if not os.path.isdir(directory):
         return []
 

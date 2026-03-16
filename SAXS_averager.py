@@ -292,11 +292,11 @@ with st.sidebar:
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("⬆️ Move Up", use_container_width=True):
+            if st.button("⬆️ Move Up", width='stretch'):
                 st.session_state.nav_root = os.path.dirname(st.session_state.nav_root)
                 st.rerun()
         with c2:
-            if st.button("⏬ Move Down", use_container_width=True):
+            if st.button("⏬ Move Down", width='stretch'):
                 if st.session_state.get("working_dir") and os.path.isdir(st.session_state.working_dir):
                     st.session_state.nav_root = st.session_state.working_dir
                     st.rerun()

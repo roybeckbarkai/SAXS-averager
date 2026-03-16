@@ -10,19 +10,36 @@ This project provides two main tools:
 
 ## Installation
 
-Ensure you have Python installed, then install the required dependencies:
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/roybeckbarkai/SAXS-averager.git
+   cd SAXS-averager
+   ```
 
-```bash
-pip install streamlit pandas numpy plotly
-```
+2. **Install dependencies:**
+   If `pip` is not recognized on your machine, use `python3 -m pip`:
+   ```bash
+   python3 -m pip install streamlit pandas numpy plotly scipy sasmodels
+   ```
 
 ## Usage
 
-### Running the Averager
-Start the main application by running:
+### Running the App
+To run the main application:
 ```bash
-streamlit run SAXS_averager.py
+python3 -m streamlit run SAXS_averager.py
 ```
+
+### Running the Splitter
+To run the file splitter directly:
+```bash
+python3 -m streamlit run SAXS_splitter.py
+```
+
+### 📂 Data Source Modes
+- **Local Directory**: (Best for local use) Browse folders on your machine using the native file dialog (Mac/PC) or the interactive Directory Tree.
+- **File Upload**: (Best for Streamlit Cloud) Select specific `.dat`, `.csv`, or `.txt` files directly in your browser. This mode allows you to process your local data even when using the web-hosted version of the app.
+
 
 **Features:**
 - **Directory Navigation:** Browse and select the directory containing your SAXS data.

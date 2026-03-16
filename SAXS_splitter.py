@@ -6,6 +6,7 @@ import shutil
 import sys
 import subprocess
 import pandas as pd
+import json
 
 # --- Page Configuration ---
 st.set_page_config(page_title="SAXS File Splitter", layout="wide")
@@ -87,23 +88,29 @@ with st.sidebar:
     
     # Initialize session state for working dir if not present
     if "splitter_dir" not in st.session_state:
-        st.session_state.splitter_dir = os.getcwd()
+        default_dir = os.getcwd()
+        try:
+            if os.path.exists("saxs_averager_state.json"):
+                with open("saxs_averager_state.json", 'r') as f:
+                    saved_state = json.load(f)
+                    if "working_dir" in saved_state:
+                        default_dir = saved_state["working_dir"]
+        except Exception:
+            pass
+        st.session_state.splitter_dir = default_dir
+
+    def clear_file_table():
+        if "file_table" in st.session_state:
+            del st.session_state["file_table"]
 
     if st.button("Browse for directory"):
         selected_dir = select_folder()
         if selected_dir:
             st.session_state.splitter_dir = selected_dir
-            # Reset the file table if directory changes
-            if "file_table" in st.session_state:
-                del st.session_state["file_table"]
+            clear_file_table()
             st.rerun()
 
-    working_dir = st.text_input("Directory Path", value=st.session_state.splitter_dir, key="working_dir_input")
-    if working_dir != st.session_state.splitter_dir:
-        st.session_state.splitter_dir = working_dir
-        if "file_table" in st.session_state:
-            del st.session_state["file_table"]
-        st.rerun()
+    st.text_input("Directory Path", key="splitter_dir", on_change=clear_file_table)
         
     st.markdown("---")
     if st.button("X Close Splitter"):
@@ -166,7 +173,7 @@ if execute_bt:
         st.error("No files selected to move.")
     else:
         # Execution loop
-        success_count = 0
+        success_count: int = 0
         errors = []
         
         progress_bar = st.progress(0)
@@ -174,7 +181,7 @@ if execute_bt:
         
         total_files = len(files_to_move)
         
-        for idx, row in files_to_move.iterrows():
+        for i, (idx, row) in enumerate(files_to_move.iterrows()):
             filename = row["Filename"]
             target_dir_name = row["Target Directory"].strip() # Clean user input
             
@@ -193,8 +200,8 @@ if execute_bt:
             except Exception as e:
                 errors.append(f"Failed to move {filename}: {e}")
                 
-            progress_bar.progress((idx + 1) / total_files)
-            status_text.text(f"Processed {idx + 1} of {total_files} files...")
+            progress_bar.progress((i + 1) / total_files)
+            status_text.text(f"Processed {i + 1} of {total_files} files...")
             
         progress_bar.empty()
         status_text.empty()

@@ -308,10 +308,12 @@ with st.sidebar:
         base_depth = base_dir.rstrip(os.sep).count(os.sep)
         try:
             for root, dirs, files in os.walk(base_dir):
-                dirs[:] = sorted([d for d in dirs if not d.startswith('.')])
+                valid_dirs = sorted([d for d in dirs if not d.startswith('.')])
+                dirs.clear()
+                dirs.extend(valid_dirs)
                 current_depth = root.rstrip(os.sep).count(os.sep) - base_depth
                 if current_depth >= max_depth:
-                    del dirs[:]
+                    dirs.clear()
                     continue
                 rel_path = os.path.relpath(root, base_dir)
                 if rel_path != '.':
@@ -355,8 +357,16 @@ with st.sidebar:
         try:
             splitter_path = os.path.join(os.path.dirname(__file__), "SAXS_splitter.py")
             if os.path.exists(splitter_path):
-                subprocess.Popen(["streamlit", "run", splitter_path, "--server.port", "8502"])
-                st.success("File Splitter opened in a new tab/window.")
+                import socket
+                def get_free_port():
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.bind(('', 0))
+                    port = s.getsockname()[1]
+                    s.close()
+                    return port
+                free_port = str(get_free_port())
+                subprocess.Popen(["streamlit", "run", splitter_path, "--server.port", free_port])
+                st.success(f"File Splitter opened in a new tab/window on port {free_port}.")
             else:
                 st.error("SAXS_splitter.py not found in the same directory.")
         except Exception as e:
@@ -462,8 +472,6 @@ df_display = pd.DataFrame([
     {
         "Filename": f["Filename"],
         "Ignore": f["Ignore"],
-        "Excluded": f["Excluded"],
-        "Points Masked": f["Points_Masked"],
         "Bad Points %": f"{f['Bad_Points_Pct']:.2f}%"
     }
     for f in frame_data
@@ -484,18 +492,16 @@ col_ui, col_plot = st.columns([1, 2])
 
 with col_ui:
     st.subheader("Frame Selection")
-    st.caption("Check 'Ignore' to force exclude. Check/Uncheck 'Excluded' to override auto-exclusion. 'Points Masked' indicates if any points were skipped.")
+    st.caption("Check 'Ignore' to force exclude.")
     
     edited_df = st.data_editor(
         styled_df,
         column_config={
             "Filename": st.column_config.TextColumn(disabled=True),
             "Bad Points %": st.column_config.TextColumn(disabled=True),
-            "Points Masked": st.column_config.CheckboxColumn(disabled=True),
-            "Ignore": st.column_config.CheckboxColumn(label="Ignore"),
-            "Excluded": st.column_config.CheckboxColumn(label="Excluded")
+            "Ignore": st.column_config.CheckboxColumn(label="Ignore")
         },
-        disabled=["Filename", "Bad Points %", "Points Masked"],
+        disabled=["Filename", "Bad Points %"],
         hide_index=True,
         key="frame_editor",
         height=600
@@ -509,21 +515,11 @@ with col_ui:
     for index, row in edited_df.iterrows():
         fname = row["Filename"]
         u_ign = row["Ignore"]
-        u_exc = row["Excluded"]
-        
-        # Find the original auto-mask value to see if we are overriding
-        orig_stat = next(x for x in frame_data if x["Filename"] == fname)
         
         entry = {}
         # Always save Ignore state if True
         if u_ign:
             entry["Ignore"] = True
-        
-        # Only save Excluded state if it differs from the Algorithm's Auto-Flag
-        # This allows the checkbox to update automatically if the user changes the slider,
-        # UNLESS the user has manually touched it.
-        if u_exc != orig_stat["Auto_Exclude_Flag"]:
-            entry["Excluded"] = u_exc
             
         if entry:
             new_overrides[fname] = entry
@@ -738,7 +734,7 @@ with col_plot:
 
 # Save State for Next Run
 curr_state = {
-    "working_dir": working_dir,
+    "working_dir": st.session_state.get("working_dir", os.getcwd()),
     "mask_percent": mask_percent,
     "ignore_percent": ignore_percent,
     "plot_mode": plot_mode,
